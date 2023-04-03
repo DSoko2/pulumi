@@ -1718,10 +1718,10 @@ func (funcSpec FunctionSpec) marshalFunctionSpec() (map[string]interface{}, erro
 		data["multiArgumentInputs"] = funcSpec.MultiArgumentInputs
 	}
 
-	if funcSpec.ReturnType != nil && funcSpec.Outputs != nil {
-		return nil, fmt.Errorf("cannot specify both Outputs and ReturnType when marshalling FunctionSpec" +
-			" because they are mutually exclusive")
-	}
+	// if funcSpec.ReturnType != nil && funcSpec.Outputs != nil {
+	// 	return nil, fmt.Errorf("cannot specify both Outputs and ReturnType when marshalling FunctionSpec" +
+	// 		" because they are mutually exclusive")
+	// }
 
 	if funcSpec.ReturnType != nil {
 		if funcSpec.ReturnType.ObjectTypeSpec != nil {
