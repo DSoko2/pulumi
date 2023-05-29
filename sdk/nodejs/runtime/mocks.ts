@@ -54,6 +54,11 @@ export interface MockResourceArgs {
     id?: string;
 }
 
+export type MockResourceResult = {
+    id: string | undefined;
+    state: Record<string, any>;
+};
+
 /**
  * MockResourceArgs is used to construct call Mock
  */
@@ -74,32 +79,70 @@ export interface MockCallArgs {
     provider?: string;
 }
 
+export type MockCallResult = Record<string, any>;
+
+export interface MockCall {
+    callAsync?: false;
+    /**
+     * Mocks provider-implemented function calls (e.g. aws.get_availability_zones).
+     * @param args: MockCallArgs
+     */
+    call(args: MockCallArgs): MockCallResult;
+}
+
+export interface MockCallAsync {
+    callAsync: true;
+    /**
+     * Mocks provider-implemented function calls (e.g. aws.get_availability_zones) asynchronously.
+     * @param args: MockCallArgs
+     */
+    call(args: MockCallArgs): Promise<MockCallResult>;
+}
+function isMockCallAsync(mocks: Partial<MockImplementations>): mocks is MockCallAsync {
+    return mocks.callAsync === true;
+}
+
+export interface MockResource {
+    newResourceAsync?: false;
+    /**
+     * Mocks resource construction calls. This function should return the physical identifier and the output properties
+     * for the resource being constructed.
+     * @param args: MockResourceArgs
+     */
+    newResource(args: MockResourceArgs): MockResourceResult;
+}
+
+export interface MockResourceAsync {
+    newResourceAsync: true;
+    /**
+     * Mocks resource construction calls asynchronously. This function should return the physical identifier and the output properties
+     * for the resource being constructed.
+     * @param args: MockResourceArgs
+     */
+    newResource(args: MockResourceArgs): Promise<MockResourceResult>;
+}
+function isMockResourceAsync(mocks: Partial<MockImplementations>): mocks is MockResourceAsync {
+    return mocks.newResourceAsync === true;
+}
+
 /**
  * Mocks is an abstract class that allows subclasses to replace operations normally implemented by the Pulumi engine with
  * their own implementations. This can be used during testing to ensure that calls to provider functions and resource constructors
  * return predictable values.
  */
-export interface Mocks {
-    /**
-     * Mocks provider-implemented function calls (e.g. aws.get_availability_zones).
-     *
-     * @param args: MockCallArgs
-     */
-    call(args: MockCallArgs): Record<string, any>;
+export type Mocks = MockCall & MockResource;
 
-    /**
-     * Mocks resource construction calls. This function should return the physical identifier and the output properties
-     * for the resource being constructed.
-
-     * @param args: MockResourceArgs
-     */
-    newResource(args: MockResourceArgs): { id: string | undefined; state: Record<string, any> };
-}
+/**
+ * Mocks is an abstract class that allows subclasses to replace operations normally implemented by the Pulumi engine with
+ * their own implementations. This can be used during testing to ensure that calls to provider functions and resource constructors
+ * return predictable values.
+ */
+export type MockImplementations = (MockCall | MockCallAsync) & (MockResource | MockResourceAsync);
 
 export class MockMonitor {
     readonly resources = new Map<string, { urn: string; id: string | undefined; state: any }>();
 
-    constructor(readonly mocks: Mocks) {}
+    constructor(readonly mocks: MockImplementations) {}
 
     private newUrn(parent: string, type: string, name: string): string {
         if (parent) {
@@ -126,11 +169,12 @@ export class MockMonitor {
                 return;
             }
 
-            const result = this.mocks.call({
+            const callArgs = {
                 token: tok,
                 inputs: inputs,
                 provider: req.getProvider(),
-            });
+            };
+            const result = isMockCallAsync(this.mocks) ? await this.mocks.call(callArgs) : this.mocks.call(callArgs);
             const response = new provproto.InvokeResponse();
             response.setReturn(structproto.Struct.fromJavaScript(await serializeProperties("", result)));
             callback(null, response);
@@ -146,14 +190,17 @@ export class MockMonitor {
                 custom = req.getCustom();
             }
 
-            const result = this.mocks.newResource({
+            const resourceArgs = {
                 type: req.getType(),
                 name: req.getName(),
                 inputs: deserializeProperties(req.getProperties()),
                 provider: req.getProvider(),
                 custom: custom,
                 id: req.getId(),
-            });
+            };
+            const result = isMockResourceAsync(this.mocks)
+                ? await this.mocks.newResource(resourceArgs)
+                : this.mocks.newResource(resourceArgs);
 
             const urn = this.newUrn(req.getParent(), req.getType(), req.getName());
             const serializedState = await serializeProperties("", result.state);
@@ -171,14 +218,17 @@ export class MockMonitor {
 
     public async registerResource(req: any, callback: (err: any, innerResponse: any) => void) {
         try {
-            const result = this.mocks.newResource({
+            const resourceArgs = {
                 type: req.getType(),
                 name: req.getName(),
                 inputs: deserializeProperties(req.getObject()),
                 provider: req.getProvider(),
                 custom: req.getCustom(),
                 id: req.getImportid(),
-            });
+            };
+            const result = isMockResourceAsync(this.mocks)
+                ? await this.mocks.newResource(resourceArgs)
+                : this.mocks.newResource(resourceArgs);
 
             const urn = this.newUrn(req.getParent(), req.getType(), req.getName());
             const serializedState = await serializeProperties("", result.state);
@@ -231,6 +281,12 @@ export class MockMonitor {
  * @param preview: If provided, indicates whether or not the program is running a preview. Defaults to false.
  * @param organization: If provided, the name of the Pulumi organization. Defaults to nothing.
  */
-export function setMocks(mocks: Mocks, project?: string, stack?: string, preview?: boolean, organization?: string) {
+export function setMocks(
+    mocks: MockImplementations,
+    project?: string,
+    stack?: string,
+    preview?: boolean,
+    organization?: string,
+) {
     setMockOptions(new MockMonitor(mocks), project, stack, preview, organization);
 }
